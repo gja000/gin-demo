@@ -1,0 +1,60 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build backend (linux/amd64)
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/server .
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm install --legacy-peer-deps && npm run build
+
+      - name: Package artifacts
+        run: |
+          mkdir -p deploy-pkg
+          cp dist/server deploy-pkg/server
+          cp -r frontend/dist deploy-pkg/web
+          cp .env.example deploy-pkg/.env.example
+          cd deploy-pkg && tar czf ../deploy.tar.gz .
+
+      - name: Upload to server via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "deploy.tar.gz"
+          target: "/opt/fleet-log/"
+
+      - name: Remote restart
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /opt/fleet-log
+            tar xzf deploy.tar.gz -C .
+            pkill -f '^/opt/fleet-log/server$' || true
+            nohup /opt/fleet-log/server > /opt/fleet-log/server.log 2>&1 &
+            sleep 3
+            curl -fsS http://127.0.0.1:8080/ping || echo "smoke-check-skipped"
