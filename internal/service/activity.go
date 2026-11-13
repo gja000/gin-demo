@@ -27,14 +27,14 @@ func StartPilot(uid uint, role, rid, actID string, vehicleIDs []string) (*model.
 	if err := db.DB.Where("id = ?", actID).First(&act).Error; err != nil {
 		return nil, errors.New("活动不存在")
 	}
-	if act.Status != model.ActApproved {
-		return nil, errors.New("当前状态不可启动试点")
-	}
 	// 幂等：若已存在试点版本则返回现状（BR-09）
 	var cnt int64
 	db.DB.Model(&model.ConfigVersion{}).Where("activity_id = ? AND batch = ?", actID, model.BatchPilot).Count(&cnt)
 	if cnt > 0 {
 		return &act, nil
+	}
+	if act.Status != model.ActApproved {
+		return nil, errors.New("当前状态不可启动试点")
 	}
 	// 校验车辆属于该车队
 	if err := validateFleetVehicles(act.FleetID, vehicleIDs); err != nil {
@@ -84,14 +84,14 @@ func Rollout(uid uint, role, rid, actID string) (*model.Activity, error) {
 	if err := db.DB.Where("id = ?", actID).First(&act).Error; err != nil {
 		return nil, errors.New("活动不存在")
 	}
-	if act.Status != model.ActPilotPassed {
-		return nil, errors.New("PILOT_NOT_PASSED:试点未通过，禁止推广")
-	}
-	// 幂等
+	// 幂等：已存在推广版本则直接返回当前状态（BR-09）
 	var rollCnt int64
 	db.DB.Model(&model.ConfigVersion{}).Where("activity_id = ? AND batch = ?", actID, model.BatchRollout).Count(&rollCnt)
 	if rollCnt > 0 {
 		return &act, nil
+	}
+	if act.Status != model.ActPilotPassed {
+		return nil, errors.New("PILOT_NOT_PASSED:试点未通过，禁止推广")
 	}
 	if err := db.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", actID).First(&act).Error; err != nil {
