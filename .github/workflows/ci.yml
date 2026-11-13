@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [dev/09]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Go build
+        run: go build ./...
+      - name: Go vet
+        run: go vet ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Frontend install & build
+        working-directory: frontend
+        run: npm install --legacy-peer-deps && npm run build
